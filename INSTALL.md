@@ -72,14 +72,19 @@ On the phone, press **Volume** to select *Unlock the bootloader*, then **Power**
 
 ## 5. Install PinLight
 
-**Option A — build it** (in the project folder, in PowerShell):
+**Easiest — download it:** get the latest `PinLight-x.y.z.apk` from the repo's **Releases** page, then either open it on the phone, or run:
+```powershell
+adb install -r PinLight-x.y.z.apk
+```
+
+**Or build it yourself** (in the project folder, in PowerShell):
 ```powershell
 $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 .\gradlew assembleDebug
 adb install -r -t app\build\outputs\apk\debug\app-debug.apk
 ```
 
-**Option B — a ready APK:** `adb install -r -t PinLight.apk`
+> Release APKs and your own builds are signed with different keys. To switch between them, uninstall PinLight first, then re-enable it in Vector and reboot.
 
 > Don't install with Android Studio's ▶ **Run** button. It can hot-swap code without replacing the installed APK, and Vector loads the installed APK.
 
@@ -106,13 +111,33 @@ Repeat **step 3** with the **new** build's `init_boot.img`, then reboot. Nothing
 
 ## Updating PinLight
 
+Install the newer APK from **Releases** over the old one (no uninstall needed), then **reboot**. A reboot is always needed, because System UI only loads the module at boot.
+
+---
+
+## For the maintainer: publishing releases
+
+GitHub Actions (`.github/workflows/build.yml`) builds a release APK on every push to `main`. You can download it under **Actions → latest run → Artifacts**. Pushing a version tag also publishes it on the **Releases** page:
 ```powershell
-git pull
-.\gradlew assembleDebug
-adb install -r -t app\build\outputs\apk\debug\app-debug.apk
-adb reboot
+git tag v0.2.0
+git push origin v0.2.0
 ```
-A reboot is always needed, because System UI only loads the module at boot.
+
+**One-time: signing key.** Every release must be signed with the same key, or updates fail. Create the key once and keep `pinlight.jks` and its password somewhere safe, outside the repo:
+```powershell
+& "C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe" -genkeypair -v -keystore pinlight.jks -alias pinlight -keyalg RSA -keysize 2048 -validity 10000
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("pinlight.jks")) | Set-Clipboard
+```
+Then go to **GitHub → repo → Settings → Secrets and variables → Actions → New repository secret** and add:
+
+| Secret | Value |
+|---|---|
+| `SIGNING_KEYSTORE_BASE64` | paste from the clipboard (the second command above) |
+| `SIGNING_STORE_PASSWORD` | the keystore password you chose |
+| `SIGNING_KEY_ALIAS` | `pinlight` |
+| `SIGNING_KEY_PASSWORD` | the key password (same as the keystore password if you pressed Enter) |
+
+Without these secrets the workflow still builds, but each APK gets a throwaway key.
 
 ## Troubleshooting
 
