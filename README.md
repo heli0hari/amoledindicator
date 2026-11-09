@@ -1,6 +1,10 @@
 # PinLight
 
-An LSPosed module that replaces the RGB notification LED. On the Always-On Display it shows only a smaller clock and, under it, a row of up to 4 tiny app-coloured icons for pending notifications. Date/weather, charging text, the fingerprint icon and Pixel's own icon row are hidden on AOD. The awake lock screen is untouched.
+<img src="docs/icon.png" width="96" alt="PinLight icon">
+
+**Setup guide: [INSTALL.md](INSTALL.md)**
+
+An LSPosed module that replaces the RGB notification LED. On the Always-On Display it shows only a smaller clock and, under it, rows of up to 12 tiny app-coloured icons for pending notifications. Date/weather, charging text, the fingerprint icon and Pixel's own icon row are hidden on AOD. The awake lock screen is untouched.
 
 ```
         07
