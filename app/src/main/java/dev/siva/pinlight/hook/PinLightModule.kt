@@ -11,6 +11,7 @@ import android.util.Log
 import dev.siva.pinlight.Protocol
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
+import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 
 // Modern libxposed (API 101/102) entry, listed in META-INF/xposed/java_init.list.
@@ -24,11 +25,26 @@ class PinLightModule : XposedModule() {
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         processName = param.processName
         instance = this
-        if (processName == Protocol.SYSTEMUI) log("module attached to System UI process")
+        log("attached to process '$processName' (framework $frameworkName, API $apiVersion)")
+    }
+
+    // Fallback entry: some frameworks call one phase but not the other.
+    override fun onPackageLoaded(param: PackageLoadedParam) {
+        log("onPackageLoaded: ${param.packageName}")
+        startIfSystemUi(param.packageName)
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
-        if (param.packageName != Protocol.SYSTEMUI) return
+        log("onPackageReady: ${param.packageName}")
+        startIfSystemUi(param.packageName)
+    }
+
+    private fun startIfSystemUi(packageName: String) {
+        if (packageName != Protocol.SYSTEMUI) return
+        if (!processName.startsWith(Protocol.SYSTEMUI)) {
+            log("skipping: process is '$processName', not System UI")
+            return
+        }
         if (processName != Protocol.SYSTEMUI) return
         if (started) return
         started = true
