@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PinLight</string>
+    <string name="xposed_description">Tiny app-coloured notification icons beside the camera on the lock screen and AOD. Replaces the RGB notification LED.</string>
+    <string-array name="xposed_scope">
+        <item>com.android.systemui</item>
+    </string-array>
+</resources>
