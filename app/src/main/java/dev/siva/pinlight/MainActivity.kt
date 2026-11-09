@@ -1,8 +1,11 @@
 package dev.siva.pinlight
 
 import android.app.Activity
+import android.content.BroadcastReceiver
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -12,6 +15,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
+import android.view.WindowInsets
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -19,12 +23,34 @@ import android.widget.TextView
 class MainActivity : Activity() {
 
     private lateinit var status: TextView
+    private lateinit var hookStatus: TextView
+    private val handler = Handler(Looper.getMainLooper())
+    private val noReply = Runnable {
+        hookStatus.text = "System UI hook: NOT LOADED\nCheck LSPosed scope (System UI) and reboot."
+    }
+
+    private val pongReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            handler.removeCallbacks(noReply)
+            val text = intent.getStringExtra(Protocol.EXTRA_STATUS) ?: "unknown"
+            hookStatus.text = "System UI hook: $text"
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val pad = (24 * resources.displayMetrics.density).toInt()
 
+        val title = TextView(this).apply {
+            text = "PinLight"
+            textSize = 28f
+            setPadding(0, 0, 0, pad / 2)
+        }
         status = TextView(this).apply { textSize = 16f }
+        hookStatus = TextView(this).apply {
+            textSize = 16f
+            setPadding(0, pad / 2, 0, pad)
+        }
 
         val grant = Button(this).apply {
             text = "Notification access"
@@ -42,8 +68,15 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(pad, pad * 3, pad, pad)
+            // Android 15+ draws edge-to-edge; keep content clear of the status bar.
+            setOnApplyWindowInsetsListener { v, insets ->
+                val bars = insets.getInsets(WindowInsets.Type.systemBars())
+                v.setPadding(pad, bars.top + pad, pad, bars.bottom + pad)
+                insets
+            }
+            addView(title)
             addView(status)
+            addView(hookStatus)
             addView(grant)
             addView(preview)
             addView(refresh)
@@ -54,10 +87,29 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         status.text = if (hasAccess()) {
-            "Notification access: on\nModule: enable in LSPosed (scope: System UI), then restart System UI."
+            "Notification access: on"
         } else {
             "Notification access: OFF — tap below to grant."
         }
+        pingHook()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        registerReceiver(pongReceiver, IntentFilter(Protocol.ACTION_PONG), Context.RECEIVER_EXPORTED)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        unregisterReceiver(pongReceiver)
+        handler.removeCallbacks(noReply)
+    }
+
+    private fun pingHook() {
+        hookStatus.text = "System UI hook: checking…"
+        sendBroadcast(Intent(Protocol.ACTION_PING).setPackage(Protocol.SYSTEMUI))
+        handler.removeCallbacks(noReply)
+        handler.postDelayed(noReply, 1500)
     }
 
     private fun hasAccess(): Boolean {
@@ -84,7 +136,7 @@ class MainActivity : Activity() {
             .putParcelableArrayListExtra(Protocol.EXTRA_ICONS, icons)
             .putExtra(Protocol.EXTRA_PREVIEW, true)
         sendBroadcast(intent)
-        Handler(Looper.getMainLooper()).postDelayed({ requestRefresh() }, 8000)
+        handler.postDelayed({ requestRefresh() }, 8000)
     }
 
     private fun requestRefresh() {

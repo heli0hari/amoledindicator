@@ -18,7 +18,6 @@ import android.view.Gravity
 import android.view.Surface
 import android.view.View
 import android.view.WindowManager
-import de.robv.android.xposed.XposedBridge
 import dev.siva.pinlight.Protocol
 import kotlin.random.Random
 
@@ -27,13 +26,13 @@ import kotlin.random.Random
 class PinOverlay(private val context: Context) {
 
     private val handler = Handler(Looper.getMainLooper())
-    private val windowManager = context.getSystemService(WindowManager::class.java)
     private val keyguard = context.getSystemService(KeyguardManager::class.java)
     private val power = context.getSystemService(PowerManager::class.java)
     private val display = context.getSystemService(DisplayManager::class.java)
         .getDisplay(Display.DEFAULT_DISPLAY)
 
-    private val view = PinView(context)
+    private lateinit var windowManager: WindowManager
+    private lateinit var view: PinView
     private var previewUntil = 0L
     private val density = context.resources.displayMetrics.density
 
@@ -52,12 +51,16 @@ class PinOverlay(private val context: Context) {
 
     private val updateVisibilityRunnable = Runnable { updateVisibility() }
 
-    fun start() {
+    // Returns a status line shown in the PinLight app.
+    fun start(): String {
         val cutout = display.cutout?.boundingRectTop
-        if (cutout == null || cutout.isEmpty) {
-            XposedBridge.log("PinLight: no top cutout found, not starting")
-            return
-        }
+        if (cutout == null || cutout.isEmpty) return "Failed: no camera cutout found"
+
+        // Android 16 wants system windows added from a window context.
+        val windowContext = context.createDisplayContext(display)
+            .createWindowContext(TYPE_SECURE_SYSTEM_OVERLAY, null)
+        windowManager = windowContext.getSystemService(WindowManager::class.java)
+        view = PinView(windowContext)
         view.cutout = Rect(cutout)
         view.visibility = View.GONE
 
@@ -97,6 +100,7 @@ class PinOverlay(private val context: Context) {
 
         // System UI may have restarted; ask the app for the current pins.
         context.sendBroadcast(Intent(Protocol.ACTION_REQUEST).setPackage(Protocol.SELF))
+        return "Connected — cutout $cutout"
     }
 
     private fun onPinsReceived(intent: Intent) {
@@ -111,6 +115,7 @@ class PinOverlay(private val context: Context) {
             pins.add(PinView.Pin(icons[i], colors[i]))
         }
         view.setPins(pins)
+        SystemUiHook.log("received ${pins.size} pins")
 
         if (intent.getBooleanExtra(Protocol.EXTRA_PREVIEW, false)) {
             previewUntil = SystemClock.uptimeMillis() + PREVIEW_MS
