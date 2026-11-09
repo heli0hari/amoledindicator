@@ -13,7 +13,7 @@ Target: Pixel 7 on stock Pixel OS, rooted with Magisk + Zygisk and Vector (JingM
 | Part | Process | Job |
 |---|---|---|
 | `PinListenerService` | app | Reads pending notifications through the public listener API, keeps the newest one per app (up to 4), and sends the icon masks and colours to System UI |
-| `PinLightModule` | System UI | Modern libxposed (API 101/102) entry. The only hook: it waits for System UI's `Application.onCreate`, then creates the overlay |
+| `PinLightModule` | System UI | Modern libxposed (API 101/102) entry. Hooks no methods: once System UI has started it creates the overlay |
 | `PinOverlay` / `PinView` | System UI | A transparent window above the keyguard that draws the pins next to the cutout. It is visible only while the phone is locked, and shifts by 2dp each minute to prevent burn-in |
 
 None of System UI's internal classes are hooked, so Pixel monthly updates are unlikely to break the module.

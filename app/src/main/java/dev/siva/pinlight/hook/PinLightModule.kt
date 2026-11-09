@@ -14,7 +14,7 @@ import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 
 // Modern libxposed (API 101/102) entry, listed in META-INF/xposed/java_init.list.
-// Only hook: wait for System UI's Application.onCreate, then add our overlay.
+// No method hooks: once System UI has started, add our own overlay window.
 // No System UI internal classes are touched, so Pixel updates rarely break it.
 class PinLightModule : XposedModule() {
 
@@ -24,25 +24,44 @@ class PinLightModule : XposedModule() {
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         processName = param.processName
         instance = this
+        if (processName == Protocol.SYSTEMUI) log("module attached to System UI process")
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
         if (param.packageName != Protocol.SYSTEMUI) return
         if (processName != Protocol.SYSTEMUI) return
-        if (!param.isFirstPackage) return
+        if (started) return
+        started = true
 
         log("module loaded into System UI")
         status = "Loaded, waiting for System UI to start"
 
-        val onCreate = Application::class.java.getDeclaredMethod("onCreate")
-        hook(onCreate).intercept { chain ->
-            val result = chain.proceed()
-            val app = chain.thisObject as? Application
-            if (app != null && !started) {
-                started = true
-                Handler(Looper.getMainLooper()).post { boot(app) }
+        // We are inside System UI's startup on its main thread. Anything posted
+        // now runs after the Application is created, so no method hook is needed.
+        waitForApplication(0)
+    }
+
+    private fun waitForApplication(attempt: Int) {
+        Handler(Looper.getMainLooper()).postDelayed({
+            val app = currentApplication()
+            if (app != null) {
+                boot(app)
+            } else if (attempt < 50) {
+                waitForApplication(attempt + 1)
+            } else {
+                status = "Failed: System UI Application never appeared"
+                log(status)
             }
-            result
+        }, if (attempt == 0) 0L else 200L)
+    }
+
+    private fun currentApplication(): Application? {
+        return try {
+            val activityThread = Class.forName("android.app.ActivityThread")
+            activityThread.getMethod("currentApplication").invoke(null) as? Application
+        } catch (t: Throwable) {
+            log("currentApplication failed: $t")
+            null
         }
     }
 
