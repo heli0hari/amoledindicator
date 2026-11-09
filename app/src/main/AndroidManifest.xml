@@ -14,14 +14,10 @@
         tools:ignore="QueryAllPackagesPermission" />
 
     <application
+        android:description="@string/xposed_description"
         android:icon="@android:drawable/sym_def_app_icon"
         android:label="@string/app_name"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
-
-        <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="@string/xposed_description" />
-        <meta-data android:name="xposedminversion" android:value="82" />
-        <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
 
         <activity
             android:name=".MainActivity"

@@ -8,31 +8,42 @@ import android.content.IntentFilter
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import de.robv.android.xposed.IXposedHookLoadPackage
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedBridge
-import de.robv.android.xposed.XposedHelpers
-import de.robv.android.xposed.callbacks.XC_LoadPackage
 import dev.siva.pinlight.Protocol
+import io.github.libxposed.api.XposedModule
+import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
+import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 
-// Only hook: wait for System UI to start, then add our own overlay window.
+// Modern libxposed (API 101/102) entry, listed in META-INF/xposed/java_init.list.
+// Only hook: wait for System UI's Application.onCreate, then add our overlay.
 // No System UI internal classes are touched, so Pixel updates rarely break it.
-class SystemUiHook : IXposedHookLoadPackage {
+class PinLightModule : XposedModule() {
 
-    override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
-        if (lpparam.packageName != Protocol.SYSTEMUI) return
-        if (lpparam.processName != Protocol.SYSTEMUI) return
+    private var processName = ""
+    private var started = false
+
+    override fun onModuleLoaded(param: ModuleLoadedParam) {
+        processName = param.processName
+        instance = this
+    }
+
+    override fun onPackageReady(param: PackageReadyParam) {
+        if (param.packageName != Protocol.SYSTEMUI) return
+        if (processName != Protocol.SYSTEMUI) return
+        if (!param.isFirstPackage) return
+
         log("module loaded into System UI")
         status = "Loaded, waiting for System UI to start"
 
-        XposedHelpers.findAndHookMethod(Application::class.java, "onCreate", object : XC_MethodHook() {
-            override fun afterHookedMethod(param: MethodHookParam) {
-                if (started) return
+        val onCreate = Application::class.java.getDeclaredMethod("onCreate")
+        hook(onCreate).intercept { chain ->
+            val result = chain.proceed()
+            val app = chain.thisObject as? Application
+            if (app != null && !started) {
                 started = true
-                val app = param.thisObject as Application
                 Handler(Looper.getMainLooper()).post { boot(app) }
             }
-        })
+            result
+        }
     }
 
     private fun boot(app: Application) {
@@ -68,15 +79,15 @@ class SystemUiHook : IXposedHookLoadPackage {
     }
 
     companion object {
-        private var started = false
+        private var instance: PinLightModule? = null
         private var status = "Not loaded"
 
         fun log(message: String) {
             Log.i(Protocol.LOG_TAG, message)
             try {
-                XposedBridge.log("PinLight: $message")
+                instance?.log(Log.INFO, Protocol.LOG_TAG, message)
             } catch (t: Throwable) {
-                // Some frameworks don't expose the bridge log.
+                // Framework log is optional.
             }
         }
     }

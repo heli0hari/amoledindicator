@@ -17,8 +17,16 @@ android {
 
     buildTypes {
         release {
-            // R8 would strip the Xposed entry class. Keep it off.
+            // R8 would strip the module entry class. Keep it off.
             isMinifyEnabled = false
+        }
+    }
+
+    // Keep only our module descriptor files from Java resources.
+    packaging {
+        resources {
+            merges += "META-INF/xposed/*"
+            excludes += "**"
         }
     }
 
@@ -35,7 +43,7 @@ kotlin {
 }
 
 dependencies {
-    // Provided by LSPosed at runtime. Must stay compileOnly.
-    compileOnly("de.robv.android.xposed:api:82")
+    // Modern Xposed API, provided by Vector/LSPosed at runtime. Must stay compileOnly.
+    compileOnly("io.github.libxposed:api:102.0.0")
     implementation("androidx.palette:palette:1.0.0")
 }

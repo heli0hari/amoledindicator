@@ -115,7 +115,7 @@ class PinOverlay(private val context: Context) {
             pins.add(PinView.Pin(icons[i], colors[i]))
         }
         view.setPins(pins)
-        SystemUiHook.log("received ${pins.size} pins")
+        PinLightModule.log("received ${pins.size} pins")
 
         if (intent.getBooleanExtra(Protocol.EXTRA_PREVIEW, false)) {
             previewUntil = SystemClock.uptimeMillis() + PREVIEW_MS
