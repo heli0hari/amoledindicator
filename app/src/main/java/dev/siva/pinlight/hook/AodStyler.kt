@@ -1,23 +1,41 @@
 package dev.siva.pinlight.hook
 
-import android.graphics.Rect
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
+import android.graphics.RectF
+import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.view.WindowManager
+import dev.siva.pinlight.PinSettings
 
-// Restyles System UI's own AOD while the display dozes: shrinks the clock and
-// hides everything else. Views are matched by resource id / class name, not by
-// System UI class hierarchy, so a Pixel update can only make something
-// reappear, never crash.
+// Restyles System UI's own AOD: resizes, moves and recolours the clock and
+// hides everything else. Views are matched by resource id / class name taken
+// from the Pixel 7 Android 16 AOD dump, so a Pixel update can only make
+// something reappear, never crash.
 class AodStyler(private val onClockBottom: (centerX: Float, bottom: Float) -> Unit) {
+
+    var settings = PinSettings()
+        set(value) {
+            field = value
+            root?.invalidate()
+        }
 
     private var root: View? = null
     private var clock: View? = null
     private val hidden = HashMap<View, Float>() // view -> alpha before we hid it
     private var active = false
     private var dumped = false
-    private val rect = Rect()
+    private var lastScan = 0L
+
+    private val transform = Matrix()
+    private val bounds = RectF()
+    private val location = IntArray(2)
+    private val layerPaint = Paint()
+    private var appliedColor = 0
 
     private val preDraw = ViewTreeObserver.OnPreDrawListener {
         if (active) enforce()
@@ -38,13 +56,14 @@ class AodStyler(private val onClockBottom: (centerX: Float, bottom: Float) -> Un
         root = shade
         active = true
         scan()
-        if (!dumped) {
+        if (!dumped && clock != null) {
             dumped = true
             dump(shade, 0)
         }
         shade.viewTreeObserver.addOnPreDrawListener(preDraw)
         shade.viewTreeObserver.addOnGlobalLayoutListener(layoutListener)
         enforce()
+        shade.invalidate()
     }
 
     fun exit() {
@@ -57,26 +76,29 @@ class AodStyler(private val onClockBottom: (centerX: Float, bottom: Float) -> Un
         for ((view, alpha) in hidden) view.alpha = alpha
         hidden.clear()
         clock?.let {
-            it.scaleX = 1f
-            it.scaleY = 1f
+            it.animationMatrix = null
+            if (appliedColor != 0) it.setLayerType(View.LAYER_TYPE_NONE, null)
         }
+        appliedColor = 0
         clock = null
     }
 
     private fun scan() {
         val shade = root ?: return
+        lastScan = SystemClock.uptimeMillis()
         val all = ArrayList<View>()
         collect(shade, all)
 
-        clock = pickClock(all, shade)
-        val clockView = clock
+        val found = pickClock(all)
+        if (found !== clock) {
+            clock?.animationMatrix = null
+            appliedColor = 0
+            clock = found
+        }
 
         for (view in all) {
             if (hidden.containsKey(view)) continue
-            if (!matches(view, HIDE_KEYS)) continue
-            if (view === clockView) continue
-            if (clockView != null && isAncestor(view, clockView)) continue
-            hidden[view] = view.alpha
+            if (shouldHide(view)) hidden[view] = view.alpha
         }
     }
 
@@ -84,30 +106,62 @@ class AodStyler(private val onClockBottom: (centerX: Float, bottom: Float) -> Un
         for (view in hidden.keys) {
             if (view.alpha != 0f) view.alpha = 0f
         }
-        val c = clock ?: return
-        if (!c.isAttachedToWindow) {
-            scan()
+
+        val c = clock
+        if (c == null || !c.isAttachedToWindow || c.width == 0) {
+            // Keyguard may still be laying out right after "going to sleep".
+            if (SystemClock.uptimeMillis() - lastScan > 100) scan()
             return
         }
-        if (c.scaleX != CLOCK_SCALE) {
-            c.pivotX = c.width / 2f
-            c.pivotY = c.height / 2f
-            c.scaleX = CLOCK_SCALE
-            c.scaleY = CLOCK_SCALE
+
+        // Scale around the clock's centre, then move. Uses the animation matrix so
+        // System UI's own translation (burn-in shift) keeps working on top.
+        val density = c.resources.displayMetrics.density
+        val scale = settings.clockScale / 100f
+        transform.setScale(scale, scale, c.width / 2f, c.height / 2f)
+        transform.postTranslate(settings.clockOffsetX * density, settings.clockOffsetY * density)
+        if (c.animationMatrix != transform) c.animationMatrix = Matrix(transform)
+
+        applyClockColor(c)
+
+        // Where the transformed clock ends up, in screen coordinates.
+        val parent = c.parent as? View ?: return
+        parent.getLocationInWindow(location)
+        bounds.set(0f, 0f, c.width.toFloat(), c.height.toFloat())
+        transform.mapRect(bounds)
+        bounds.offset(location[0] + c.left + c.translationX, location[1] + c.top + c.translationY)
+        onClockBottom(bounds.centerX(), bounds.bottom)
+    }
+
+    // Recolour every pixel of the clock through a hardware layer, so it works
+    // whatever way the clock face draws its digits.
+    private fun applyClockColor(c: View) {
+        val color = settings.clockColor
+        if (color == 0) {
+            if (appliedColor != 0) {
+                c.setLayerType(View.LAYER_TYPE_NONE, null)
+                appliedColor = 0
+            }
+            return
         }
-        if (c.getGlobalVisibleRect(rect)) {
-            onClockBottom(rect.exactCenterX(), rect.bottom.toFloat())
+        if (appliedColor != color || c.layerType != View.LAYER_TYPE_HARDWARE) {
+            layerPaint.colorFilter = PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN)
+            c.setLayerType(View.LAYER_TYPE_HARDWARE, layerPaint)
+            appliedColor = color
         }
     }
 
-    // The large clock: the biggest visible "clock" view that isn't a
-    // full-screen container.
-    private fun pickClock(all: List<View>, shade: View): View? {
-        val screenArea = shade.width.toLong() * shade.height
+    private fun pickClock(all: List<View>): View? {
+        // Exact match first (Android 16 Pixel clock), then any "clock" view.
+        for (view in all) {
+            if (view.javaClass.simpleName == "FlexClockViewGroup" && view.width > 0) return view
+        }
         var best: View? = null
         var bestArea = 0L
+        val screenArea = (root?.width ?: 0).toLong() * (root?.height ?: 0)
         for (view in all) {
-            if (!matches(view, CLOCK_KEYS)) continue
+            val name = (idName(view) + view.javaClass.simpleName).lowercase()
+            if (!name.contains("clock")) continue
             if (!view.isShown || view.width == 0 || view.height == 0) continue
             val area = view.width.toLong() * view.height
             if (area > screenArea * 6 / 10) continue
@@ -119,22 +173,9 @@ class AodStyler(private val onClockBottom: (centerX: Float, bottom: Float) -> Un
         return best
     }
 
-    private fun matches(view: View, keys: Array<String>): Boolean {
-        val id = idName(view).lowercase()
-        val cls = view.javaClass.simpleName.lowercase()
-        for (key in keys) {
-            if (id.contains(key) || cls.contains(key)) return true
-        }
-        return false
-    }
-
-    private fun isAncestor(parent: View, child: View): Boolean {
-        var p = child.parent
-        while (p != null) {
-            if (p === parent) return true
-            p = p.parent
-        }
-        return false
+    private fun shouldHide(view: View): Boolean {
+        if (idName(view) in HIDE_IDS) return true
+        return view.javaClass.simpleName in HIDE_CLASSES
     }
 
     private fun collect(view: View, out: MutableList<View>) {
@@ -153,14 +194,14 @@ class AodStyler(private val onClockBottom: (centerX: Float, bottom: Float) -> Un
         }
     }
 
-    // One-time map of visible AOD views, so new ids can be targeted precisely.
+    // One-time map of visible AOD views, for targeting new ids after updates.
     private fun dump(view: View, depth: Int) {
         if (depth > 25) return
         if (view.isShown && view.width > 0 && view.height > 0) {
-            view.getGlobalVisibleRect(rect)
+            view.getLocationInWindow(location)
             PinLightModule.log(
-                "DUMP ${"  ".repeat(depth)}${view.javaClass.simpleName} " +
-                    "id=${idName(view)} $rect a=${view.alpha}"
+                "DUMP ${"  ".repeat(depth)}${view.javaClass.simpleName} id=${idName(view)} " +
+                    "at ${location[0]},${location[1]} ${view.width}x${view.height} a=${view.alpha}"
             )
         }
         if (view is ViewGroup) {
@@ -187,24 +228,26 @@ class AodStyler(private val onClockBottom: (centerX: Float, bottom: Float) -> Un
     }
 
     companion object {
-        const val CLOCK_SCALE = 0.6f
-
-        private val CLOCK_KEYS = arrayOf("clock")
-
-        // Date/weather, charging text, fingerprint icon, Pixel's AOD icon row.
-        private val HIDE_KEYS = arrayOf(
-            "smartspace",
-            "keyguard_slice",
-            "status_area",
-            "indication",
-            "device_entry_icon",
-            "lock_icon",
-            "udfps",
-            "notification_icon",
-            "notificationicon",
-            "shelf",
-            "now_playing",
-            "ambient"
+        // From the Pixel 7 / Android 16 AOD dump, plus older names as fallbacks.
+        private val HIDE_IDS = setOf(
+            "keyguard_indication_area",      // "Charged", battery text
+            "ambient_indication_container",  // Now Playing
+            "date_smartspace_view_large",    // date + weather
+            "date_smartspace_view",
+            "bc_smartspace_view",
+            "keyguard_slice_view",
+            "device_entry_icon_view",        // fingerprint icon
+            "lock_icon_view",
+            "notification_icon_area",        // Pixel's AOD icon row
+            "aod_notification_icon_container"
+        )
+        private val HIDE_CLASSES = setOf(
+            "KeyguardIndicationArea",
+            "AmbientIndicationContainer",
+            "DateSmartspaceView",
+            "BcSmartspaceView",
+            "DeviceEntryIconView",
+            "NotificationIconContainer"
         )
     }
 }

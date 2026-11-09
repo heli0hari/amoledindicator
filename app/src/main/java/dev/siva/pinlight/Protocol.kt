@@ -7,6 +7,7 @@ object Protocol {
 
     const val ACTION_UPDATE = "dev.siva.pinlight.UPDATE"   // app -> System UI
     const val ACTION_REQUEST = "dev.siva.pinlight.REQUEST" // System UI / app UI -> listener
+    const val ACTION_SETTINGS = "dev.siva.pinlight.SETTINGS" // app -> System UI
     const val ACTION_PING = "dev.siva.pinlight.PING"       // app UI -> System UI
     const val ACTION_PONG = "dev.siva.pinlight.PONG"       // System UI -> app UI
     const val PERMISSION = "dev.siva.pinlight.permission.UPDATE"
@@ -17,7 +18,8 @@ object Protocol {
     const val EXTRA_COLORS = "colors"
     const val EXTRA_ICONS = "icons"
     const val EXTRA_PREVIEW = "preview"
+    const val EXTRA_SETTINGS = "settings"
 
-    const val MAX_PINS = 4
+    const val MAX_PINS = PinSettings.MAX_PINS_LIMIT
     const val ICON_PX = 72
 }

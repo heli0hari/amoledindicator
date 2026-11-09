@@ -17,7 +17,9 @@ Target: Pixel 7 on stock Pixel OS, rooted with Magisk + Zygisk and Vector (JingM
 | `PinListenerService` | app | Reads pending notifications through the public listener API, keeps the newest one per app (up to 4), and sends the icon masks and colours to System UI |
 | `PinLightModule` | System UI | Modern libxposed (API 101/102) entry. Hooks no methods: once System UI has started it creates the overlay |
 | `PinOverlay` / `PinView` | System UI | A transparent full-screen window that draws the pin row under the clock, only while the display dozes (AOD). The row follows the clock, so System UI's own burn-in shift moves it too |
-| `AodStyler` | System UI | On AOD, scales the clock to 60% and hides other keyguard views, matched by resource id / class name. Restores them when the screen wakes. Dumps the AOD view tree to logcat once per boot (`DUMP` lines, tag `PinLight`) |
+| `PinSettings` | both | Look settings (clock size/colour/position, icon count, rows, size, spacing, colour). Saved in the app, pushed to System UI on every change |
+| `SleepSignals` | System UI | Hooks System UI's "started going to sleep / waking up" events so the AOD is restyled before the screen-off animation. Falls back to screen and display broadcasts |
+| `AodStyler` | System UI | On AOD, resizes/moves the clock (animation matrix, so System UI's burn-in shift still works), recolours it via a hardware layer, and hides other keyguard views, matched by resource id / class name. Restores them when the screen wakes. Dumps the AOD view tree to logcat once per boot (`DUMP` lines, tag `PinLight`) |
 
 No System UI methods are hooked. If a Pixel update renames a view id, that element simply reappears on AOD; nothing crashes.
 

@@ -9,29 +9,33 @@ import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.view.Display
 import android.view.Gravity
 import android.view.Surface
 import android.view.View
 import android.view.WindowManager
+import dev.siva.pinlight.PinSettings
 import dev.siva.pinlight.Protocol
 import kotlin.random.Random
 
 // Runs inside System UI. Owns one transparent full-screen window and draws the
-// pins under the clock, only while the display is in AOD (doze).
+// pins under the clock while the phone is asleep (AOD). Restyling starts the
+// moment the phone starts going to sleep, so the default AOD never shows.
 class PinOverlay(private val context: Context) {
 
     private val handler = Handler(Looper.getMainLooper())
     private val displayManager = context.getSystemService(DisplayManager::class.java)
     private val display = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
     private val density = context.resources.displayMetrics.density
+    private val power = context.getSystemService(PowerManager::class.java)
 
     private lateinit var windowManager: WindowManager
     private lateinit var view: PinView
     private lateinit var styler: AodStyler
     private var previewUntil = 0L
-    private var dozing = false
+    private var aod = false
 
     private val updateReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, intent: Intent) {
@@ -39,9 +43,23 @@ class PinOverlay(private val context: Context) {
         }
     }
 
-    private val tickReceiver = object : BroadcastReceiver() {
+    private val settingsReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, intent: Intent) {
-            shiftForBurnIn()
+            val settings = PinSettings.fromBundle(intent.getBundleExtra(Protocol.EXTRA_SETTINGS))
+            view.settings = settings
+            styler.settings = settings
+            PinLightModule.log("settings updated")
+        }
+    }
+
+    // Fallback signals in case the sleep hooks are missing on this build.
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, intent: Intent) {
+            when (intent.action) {
+                Intent.ACTION_SCREEN_OFF -> setAod(true)
+                Intent.ACTION_SCREEN_ON -> setAod(false)
+                Intent.ACTION_TIME_TICK -> shiftForBurnIn()
+            }
         }
     }
 
@@ -91,13 +109,20 @@ class PinOverlay(private val context: Context) {
             Context.RECEIVER_EXPORTED
         )
         context.registerReceiver(
-            tickReceiver,
-            IntentFilter(Intent.ACTION_TIME_TICK),
-            null,
+            settingsReceiver,
+            IntentFilter(Protocol.ACTION_SETTINGS),
+            Protocol.PERMISSION,
             handler,
-            Context.RECEIVER_NOT_EXPORTED
+            Context.RECEIVER_EXPORTED
         )
+        val screenFilter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_TIME_TICK)
+        }
+        context.registerReceiver(screenReceiver, screenFilter, null, handler, Context.RECEIVER_NOT_EXPORTED)
         displayManager.registerDisplayListener(displayListener, handler)
+        SleepSignals.listener = { asleep -> setAod(asleep) }
         onDisplayState()
 
         // System UI may have restarted; ask the app for the current pins.
@@ -107,11 +132,18 @@ class PinOverlay(private val context: Context) {
 
     private fun onDisplayState() {
         val state = display.state
-        val nowDozing = state == Display.STATE_DOZE || state == Display.STATE_DOZE_SUSPEND
-        if (nowDozing == dozing) return
-        dozing = nowDozing
-        PinLightModule.log("display dozing=$dozing")
-        if (dozing) {
+        if (state == Display.STATE_DOZE || state == Display.STATE_DOZE_SUSPEND) {
+            setAod(true)
+        } else if (state == Display.STATE_ON && power.isInteractive) {
+            setAod(false)
+        }
+    }
+
+    private fun setAod(asleep: Boolean) {
+        if (asleep == aod) return
+        aod = asleep
+        PinLightModule.log("aod=$aod")
+        if (aod) {
             styler.enter()
         } else {
             styler.exit()
@@ -145,7 +177,7 @@ class PinOverlay(private val context: Context) {
     private fun updateVisibility() {
         val portrait = display.rotation == Surface.ROTATION_0
         val previewing = SystemClock.uptimeMillis() < previewUntil
-        val show = view.hasPins() && portrait && (dozing || previewing)
+        val show = view.hasPins() && portrait && (aod || previewing)
         view.visibility = if (show) View.VISIBLE else View.GONE
     }
 

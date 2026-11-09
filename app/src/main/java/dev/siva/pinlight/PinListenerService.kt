@@ -12,7 +12,8 @@ import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
-// Watches pending notifications and pushes the newest 4 apps to System UI.
+// Watches pending notifications and pushes the newest apps (up to the user's
+// maximum) to System UI.
 class PinListenerService : NotificationListenerService() {
 
     private val handler = Handler(Looper.getMainLooper())
@@ -21,6 +22,8 @@ class PinListenerService : NotificationListenerService() {
 
     private val requestReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            // System UI (re)started or settings changed: resend everything.
+            PinSettings.push(this@PinListenerService)
             scheduleSend()
         }
     }
@@ -28,6 +31,7 @@ class PinListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
         connected = true
         registerReceiver(requestReceiver, IntentFilter(Protocol.ACTION_REQUEST), Context.RECEIVER_EXPORTED)
+        PinSettings.push(this)
         scheduleSend()
     }
 
@@ -67,11 +71,12 @@ class PinListenerService : NotificationListenerService() {
             if (!newestPerApp.containsKey(sbn.packageName)) newestPerApp[sbn.packageName] = sbn
         }
 
+        val maxPins = PinSettings.load(this).maxPins.coerceIn(1, Protocol.MAX_PINS)
         val packages = ArrayList<String>()
         val colors = ArrayList<Int>()
         val icons = ArrayList<Bitmap>()
         for (sbn in newestPerApp.values) {
-            if (packages.size >= Protocol.MAX_PINS) break
+            if (packages.size >= maxPins) break
             val mask = IconPacker.mask(this, sbn) ?: continue
             packages.add(sbn.packageName)
             colors.add(IconPacker.color(this, sbn))

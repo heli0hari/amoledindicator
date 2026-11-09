@@ -15,8 +15,10 @@ import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 
 // Modern libxposed (API 101/102) entry, listed in META-INF/xposed/java_init.list.
-// No method hooks: once System UI has started, add our own overlay window.
-// No System UI internal classes are touched, so Pixel updates rarely break it.
+// Once System UI has started we add our own overlay window. The only hooks are
+// System UI's "started going to sleep / waking up" events, used to restyle the
+// AOD before its screen-off animation. If those classes ever disappear, the
+// overlay falls back to public screen/display signals.
 class PinLightModule : XposedModule() {
 
     private var processName = ""
@@ -34,27 +36,64 @@ class PinLightModule : XposedModule() {
 
     // Fallback entry: some frameworks call one phase but not the other.
     override fun onPackageLoaded(param: PackageLoadedParam) {
-        startIfSystemUi(param.packageName)
+        startIfSystemUi(param.packageName, param.defaultClassLoader)
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
-        startIfSystemUi(param.packageName)
+        startIfSystemUi(param.packageName, param.classLoader)
     }
 
-    private fun startIfSystemUi(packageName: String) {
+    private fun startIfSystemUi(packageName: String, classLoader: ClassLoader) {
         if (packageName != Protocol.SYSTEMUI) return
         if (processName != Protocol.SYSTEMUI) return
         if (started) return
         started = true
-        // We need no more package callbacks in this process.
-        safeDetach()
 
         log("module loaded into System UI")
+        hookSleepEvents(classLoader)
         status = "Loaded, waiting for System UI to start"
 
         // We are inside System UI's startup on its main thread. Anything posted
         // now runs after the Application is created, so no method hook is needed.
         waitForApplication(0)
+    }
+
+    // Earliest moment the phone starts sleeping / waking. Tries every known
+    // home of these events; whichever exists on this Android version is used.
+    private fun hookSleepEvents(classLoader: ClassLoader) {
+        val targets = arrayOf(
+            "com.android.systemui.keyguard.WakefulnessLifecycle",
+            "com.android.systemui.power.domain.interactor.PowerInteractor"
+        )
+        val sleepNames = arrayOf("dispatchStartedGoingToSleep", "onStartedGoingToSleep")
+        val wakeNames = arrayOf("dispatchStartedWakingUp", "onStartedWakingUp")
+        var hooked = 0
+
+        for (className in targets) {
+            val cls = try {
+                classLoader.loadClass(className)
+            } catch (t: Throwable) {
+                continue
+            }
+            for (method in cls.declaredMethods) {
+                val asleep = when (method.name) {
+                    in sleepNames -> true
+                    in wakeNames -> false
+                    else -> continue
+                }
+                try {
+                    hook(method).intercept { chain ->
+                        val result = chain.proceed()
+                        SleepSignals.post(asleep)
+                        result
+                    }
+                    hooked++
+                } catch (t: Throwable) {
+                    log("hook ${method.name} failed: $t")
+                }
+            }
+        }
+        log("sleep hooks installed: $hooked")
     }
 
     private fun safeDetach() {
