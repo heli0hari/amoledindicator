@@ -93,6 +93,7 @@ adb install -r -t app\build\outputs\apk\debug\app-debug.apk
 1. **Vector → Modules → PinLight → Enable.** System UI is ticked automatically and shows *Fixed by the module*.
 2. **Reboot.**
 3. Open **PinLight → Notification access** and allow it.
+   > Shows **"App was denied access"**? Apps installed from a downloaded APK are blocked from this permission by Android. Go to **Settings → Apps → PinLight → ⋮ → Allow restricted settings**, then try again. Installs done with `adb install` don't need this.
 4. The app's header should say **System UI hook: Connected**.
 5. Phone settings:
    - **Settings → Display → Lock screen → Always show time and info → On.** Without AOD, the screen is fully off and nothing can light up.
@@ -146,6 +147,7 @@ Without these secrets the workflow still builds, but each APK gets a throwaway k
 | App says **System UI hook: not loaded** | Vector → Modules: is PinLight enabled? Reboot after enabling. |
 | Vector says **Needs attention** | Zygisk is off, or you didn't reboot after flashing Vector. |
 | Default AOD (date, fingerprint, "Charged") still shows | You're on an old PinLight build. Reinstall with `adb install -r -t`, then reboot. |
+| *App was denied access* when granting notification access | Settings → Apps → PinLight → ⋮ → **Allow restricted settings** |
 | Icons don't appear | Notification access is off, or the notification is *silent*. Only alerting notifications count, like an LED. |
 | `adb shell su` → *Permission denied* | Magisk → Settings → Superuser access → **Apps and ADB**. |
 | Need logs | `adb reboot`, then `adb wait-for-device logcat -s PinLight > log.txt`. Lock the phone, then press Ctrl+C. |
