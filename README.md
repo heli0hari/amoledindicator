@@ -1,9 +1,11 @@
 # PinLight
 
-An LSPosed module that replaces the RGB notification LED. When notifications are pending, tiny icons appear beside the camera hole on the lock screen and AOD. Each icon is drawn in its app's colour. Nothing else is shown.
+An LSPosed module that replaces the RGB notification LED. On the Always-On Display it shows only a smaller clock and, under it, a row of up to 4 tiny app-coloured icons for pending notifications. Date/weather, charging text, the fingerprint icon and Pixel's own icon row are hidden on AOD. The awake lock screen is untouched.
 
 ```
-   [L2] [L1]  ( o )  [R1] [R2]      newest = L1, then R1, L2, R2
+        07
+        03          <- clock, scaled to 60%
+   ●  ●  ●  ●       <- newest on the left
 ```
 
 Target: Pixel 7 on stock Pixel OS, rooted with Magisk + Zygisk and Vector (JingMatrix LSPosed, libxposed API 102).
@@ -14,9 +16,10 @@ Target: Pixel 7 on stock Pixel OS, rooted with Magisk + Zygisk and Vector (JingM
 |---|---|---|
 | `PinListenerService` | app | Reads pending notifications through the public listener API, keeps the newest one per app (up to 4), and sends the icon masks and colours to System UI |
 | `PinLightModule` | System UI | Modern libxposed (API 101/102) entry. Hooks no methods: once System UI has started it creates the overlay |
-| `PinOverlay` / `PinView` | System UI | A transparent window above the keyguard that draws the pins next to the cutout. It is visible only while the phone is locked, and shifts by 2dp each minute to prevent burn-in |
+| `PinOverlay` / `PinView` | System UI | A transparent full-screen window that draws the pin row under the clock, only while the display dozes (AOD). The row follows the clock, so System UI's own burn-in shift moves it too |
+| `AodStyler` | System UI | On AOD, scales the clock to 60% and hides other keyguard views, matched by resource id / class name. Restores them when the screen wakes. Dumps the AOD view tree to logcat once per boot (`DUMP` lines, tag `PinLight`) |
 
-None of System UI's internal classes are hooked, so Pixel monthly updates are unlikely to break the module.
+No System UI methods are hooked. If a Pixel update renames a view id, that element simply reappears on AOD; nothing crashes.
 
 **What counts as pending:** notifications that alert (importance DEFAULT or higher) and can be dismissed. Silent, ongoing and foreground-service notifications are ignored, the same way an LED behaves.
 

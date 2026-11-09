@@ -24,30 +24,30 @@ class PinLightModule : XposedModule() {
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         processName = param.processName
-        instance = this
-        log("attached to process '$processName' (framework $frameworkName, API $apiVersion)")
+        if (processName != Protocol.SYSTEMUI) {
+            // e.g. PinLight's own app process: nothing to do here.
+            safeDetach()
+            return
+        }
+        log("attached to System UI (framework $frameworkName, API $apiVersion)")
     }
 
     // Fallback entry: some frameworks call one phase but not the other.
     override fun onPackageLoaded(param: PackageLoadedParam) {
-        log("onPackageLoaded: ${param.packageName}")
         startIfSystemUi(param.packageName)
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
-        log("onPackageReady: ${param.packageName}")
         startIfSystemUi(param.packageName)
     }
 
     private fun startIfSystemUi(packageName: String) {
         if (packageName != Protocol.SYSTEMUI) return
-        if (!processName.startsWith(Protocol.SYSTEMUI)) {
-            log("skipping: process is '$processName', not System UI")
-            return
-        }
         if (processName != Protocol.SYSTEMUI) return
         if (started) return
         started = true
+        // We need no more package callbacks in this process.
+        safeDetach()
 
         log("module loaded into System UI")
         status = "Loaded, waiting for System UI to start"
@@ -55,6 +55,14 @@ class PinLightModule : XposedModule() {
         // We are inside System UI's startup on its main thread. Anything posted
         // now runs after the Application is created, so no method hook is needed.
         waitForApplication(0)
+    }
+
+    private fun safeDetach() {
+        try {
+            detach()
+        } catch (t: Throwable) {
+            // Older frameworks lack detach(); callbacks are harmless anyway.
+        }
     }
 
     private fun waitForApplication(attempt: Int) {
@@ -114,16 +122,10 @@ class PinLightModule : XposedModule() {
     }
 
     companion object {
-        private var instance: PinLightModule? = null
         private var status = "Not loaded"
 
         fun log(message: String) {
             Log.i(Protocol.LOG_TAG, message)
-            try {
-                instance?.log(Log.INFO, Protocol.LOG_TAG, message)
-            } catch (t: Throwable) {
-                // Framework log is optional.
-            }
         }
     }
 }
