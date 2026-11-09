@@ -126,7 +126,7 @@ git push origin v0.2.0
 **One-time: signing key.** Every release must be signed with the same key, or updates fail. Create the key once and keep `pinlight.jks` and its password somewhere safe, outside the repo:
 ```powershell
 & "C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe" -genkeypair -v -keystore pinlight.jks -alias pinlight -keyalg RSA -keysize 2048 -validity 10000
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("pinlight.jks")) | Set-Clipboard
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD\pinlight.jks")) | Set-Clipboard
 ```
 Then go to **GitHub → repo → Settings → Secrets and variables → Actions → New repository secret** and add:
 
